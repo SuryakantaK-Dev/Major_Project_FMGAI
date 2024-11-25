@@ -2,6 +2,13 @@ import os
 from autogen import ConversableAgent
 from flaml import autogen
 import absl.logging
+from datetime import date, timedelta
+import sqlite3
+import yfinance as yf
+import pandas as pd
+import sqlite3
+import sqlite3
+import pandas as pd
 
 # Suppress unnecessary logging
 absl.logging.set_verbosity(absl.logging.ERROR)
@@ -38,7 +45,11 @@ def generate_sql_query(schema, user_question):
     response = text2sql_agent.generate_reply(
         messages=[{"content": f"{schema}\nQuestion: {user_question}", "role": "user"}]
     )
-    return response['content']
+
+    # Strip the code blocks from the response
+    sql_query = response['content'].strip('```sql\n')
+
+    return sql_query
 
 
 # LLM2 - RAG Placeholder
@@ -70,6 +81,96 @@ def execute_web_search(question):
         messages=[{"content": question, "role": "user"}]
     )
     return response['content']
+def create_table():
+    # Connect to the SQLite database (or create it if it doesn't exist)
+    conn = sqlite3.connect("./stock_data.db")
+    cursor = conn.cursor()
+
+    # Create the table using the schema
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS stock_data (
+             date DATE,
+            ticker VARCHAR(10),
+            adj_close DECIMAL(10, 6),
+            close DECIMAL(10, 6),
+            high DECIMAL(10, 6),
+            low DECIMAL(10, 6),
+            open DECIMAL(10, 6),
+            volume BIGINT,
+            PRIMARY KEY (date, ticker)
+        );
+        ''')
+
+    # Commit changes and close the connection
+    conn.commit()
+    conn.close()
+
+# Function to fetch stock data and save to Excel and SQLite
+def get_stock_data(ticker, start_date, end_date, filename="stock_data.xlsx"):
+    # Fetch historical market data
+    stock_data = yf.download(ticker, start=start_date, end=end_date)
+
+    # Remove timezone information from the Date index
+    stock_data.index = stock_data.index.tz_localize(None)
+
+    # Save to Excel (you can modify this to save with different filenames if desired)
+    stock_data.to_excel(filename)
+
+    # Insert data into SQLite database
+    conn = sqlite3.connect("./stock_data.db")
+    cursor = conn.cursor()
+
+    # Prepare SQL insert statement
+    for date, row in stock_data.iterrows():
+        # Convert date to string format
+        date_str = date.strftime('%Y-%m-%d')  # Format the date to YYYY-MM-DD
+
+        # Access the row values using the MultiIndex structure
+        cursor.execute('''
+            INSERT OR REPLACE INTO stock_data (date, ticker, adj_close, close, high, low, open, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            date_str,
+            ticker,
+            row[('Adj Close', ticker)],
+            row[('Close', ticker)],
+            row[('High', ticker)],
+            row[('Low', ticker)],
+            row[('Open', ticker)],
+            row[('Volume', ticker)]
+        ))
+
+    # Commit changes and close the connection
+    conn.commit()
+    conn.close()
+
+    # Return the DataFrame for further use or display
+    return stock_data
+
+
+def fetch_data(schema, question):
+    # Connect to the SQLite database
+    create_table()
+    #Database has default data to tesla and apple  for current use case
+    get_stock_data('TSLA', '2024-11-20', '2024-11-26')
+    get_stock_data('AAPL', '2024-11-20', '2024-11-26')
+    conn = sqlite3.connect("./stock_data.db")
+    # question="Write a SQL query to select All Stocks of AAPL"
+    #question = "What was the difference between last open and close value for Tesla"
+    print(question)
+
+    query = generate_sql_query(schema, user_question)
+    print(query)
+    # Fetch the data into a DataFrame
+    df = pd.read_sql_query(query, conn)
+
+    # Close the connection
+    conn.close()
+
+    # Display the fetched data
+    print("Data retrieved from the database:")
+    #print(df)
+    return df
 
 
 # Main Execution
@@ -91,10 +192,10 @@ if __name__ == "__main__":
      PRIMARY KEY (date, ticker)
     );
     """
-    user_question = "What was the last open and close value for Tesla?"
-    sql_query = generate_sql_query(schema, user_question)
-    print("\nGenerated SQL Query:")
-    print(sql_query)
+    user_question = "What was the last open and close value for TSLA?"
+    df=fetch_data(schema, user_question)
+    #print("\nGenerated SQL Query:")
+    print(df)
 
     # Example for LLM2 - RAG Placeholder
     print("\nRAG LLM2 Output:")
