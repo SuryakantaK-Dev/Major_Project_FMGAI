@@ -160,6 +160,7 @@ def fetch_data(schema, question):
     print(question)
 
     query = generate_sql_query(schema, user_question)
+    print("\nGenerated SQL Query:")
     print(query)
     # Fetch the data into a DataFrame
     df = pd.read_sql_query(query, conn)
