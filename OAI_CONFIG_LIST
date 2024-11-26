@@ -1,0 +1,17 @@
+[
+    {
+        "model": "meta-llama/Meta-Llama-3-8B-Instruct-Turbo",
+        "api_key": "0637c2c6fa48825f653b7293982aa456794b2bf9fd67cb5587e8cb90cc37ee9b",
+        "api_type": "together"
+    },
+    {
+        "model": "meta-llama/Llama-2-13b-chat-hf",
+        "api_key": "0637c2c6fa48825f653b7293982aa456794b2bf9fd67cb5587e8cb90cc37ee9b",
+        "api_type": "together"
+    },
+    {
+        "model": "Qwen/Qwen2-72B-Instruct",
+        "api_key": "0637c2c6fa48825f653b7293982aa456794b2bf9fd67cb5587e8cb90cc37ee9b",
+        "api_type": "together"
+    }
+]
