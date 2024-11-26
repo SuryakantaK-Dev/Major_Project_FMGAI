@@ -6,17 +6,23 @@ from datetime import date, timedelta
 import sqlite3
 import yfinance as yf
 import pandas as pd
-import sqlite3
-import sqlite3
-import pandas as pd
+from dotenv import load_dotenv
+from duckduckgo import extract_news
 
 # Suppress unnecessary logging
 absl.logging.set_verbosity(absl.logging.ERROR)
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 
+# Load the .env file
+load_dotenv()
+
 # Configuration for AutoGen
 config_list_gemini = autogen.config_list_from_json("model_config.json")
+config_list = autogen.config_list_from_json("OAI_CONFIG_LIST")
+assert len(config_list) > 0
+print("models to use: ", [config_list[i]["model"] for i in range(len(config_list))])
 
+llm_config = {"config_list": config_list, "timeout": 60, "temperature": 0.8, "seed": 1234}
 
 # Helper function to retrieve API key from the configuration
 def get_api_key(config_list, model_name):
@@ -24,7 +30,6 @@ def get_api_key(config_list, model_name):
         if config["model"] == model_name:
             return config["api_key"]
     raise ValueError(f"API key for model '{model_name}' not found in the configuration.")
-
 
 # LLM1 - Text2SQL
 text2sql_agent = ConversableAgent(
@@ -36,7 +41,6 @@ text2sql_agent = ConversableAgent(
     function_map=None
 )
 
-
 def generate_sql_query(schema, user_question):
     """
     Generates an SQL query based on the provided schema and question.
@@ -45,12 +49,9 @@ def generate_sql_query(schema, user_question):
     response = text2sql_agent.generate_reply(
         messages=[{"content": f"{schema}\nQuestion: {user_question}", "role": "user"}]
     )
-
     # Strip the code blocks from the response
     sql_query = response['content'].strip('```sql\n')
-
     return sql_query
-
 
 # LLM2 - RAG Placeholder
 def llm2_display_url():
@@ -60,33 +61,21 @@ def llm2_display_url():
     url = "http://192.168.0.169:8501"
     return f"For Use Of RAG And PDF Chat is available at {url}"
 
-
 # LLM3 - Web Search
-web_search_agent = ConversableAgent(
-    name="Web Search Agent",
-    system_message="You are a web search agent. Search for the information requested and provide accurate responses.",
-    llm_config={"config_list": config_list_gemini},
-    code_execution_config=False,
-    human_input_mode="NEVER",
-    function_map=None
-)
-
-
-def execute_web_search(question):
+def execute_web_search_llm3(problem):
     """
-    Executes the Web Search Agent to find additional information related to the question.
+    Executes the Web Search using DuckDuckGo for the given problem.
     """
-    print("Executing Web Search Agent...")
-    response = web_search_agent.generate_reply(
-        messages=[{"content": question, "role": "user"}]
-    )
-    return response['content']
+    print("\nExecuting Web Search LLM - 3...")
+    extractor = extract_news(text=problem)
+    extractor.extract_entity()
+    news = extractor.call_duckduckgo()
+    return news
+
+# SQLite Table Creation
 def create_table():
-    # Connect to the SQLite database (or create it if it doesn't exist)
     conn = sqlite3.connect("./stock_data.db")
     cursor = conn.cursor()
-
-    # Create the table using the schema
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS stock_data (
              date DATE,
@@ -100,32 +89,18 @@ def create_table():
             PRIMARY KEY (date, ticker)
         );
         ''')
-
-    # Commit changes and close the connection
     conn.commit()
     conn.close()
 
-# Function to fetch stock data and save to Excel and SQLite
+# Fetch Stock Data
 def get_stock_data(ticker, start_date, end_date, filename="stock_data.xlsx"):
-    # Fetch historical market data
     stock_data = yf.download(ticker, start=start_date, end=end_date)
-
-    # Remove timezone information from the Date index
     stock_data.index = stock_data.index.tz_localize(None)
-
-    # Save to Excel (you can modify this to save with different filenames if desired)
     stock_data.to_excel(filename)
-
-    # Insert data into SQLite database
     conn = sqlite3.connect("./stock_data.db")
     cursor = conn.cursor()
-
-    # Prepare SQL insert statement
     for date, row in stock_data.iterrows():
-        # Convert date to string format
-        date_str = date.strftime('%Y-%m-%d')  # Format the date to YYYY-MM-DD
-
-        # Access the row values using the MultiIndex structure
+        date_str = date.strftime('%Y-%m-%d')
         cursor.execute('''
             INSERT OR REPLACE INTO stock_data (date, ticker, adj_close, close, high, low, open, volume)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -139,40 +114,23 @@ def get_stock_data(ticker, start_date, end_date, filename="stock_data.xlsx"):
             row[('Open', ticker)],
             row[('Volume', ticker)]
         ))
-
-    # Commit changes and close the connection
     conn.commit()
     conn.close()
-
-    # Return the DataFrame for further use or display
     return stock_data
 
-
 def fetch_data(schema, question):
-    # Connect to the SQLite database
     create_table()
-    #Database has default data to tesla and apple  for current use case
     get_stock_data('TSLA', '2024-11-20', '2024-11-26')
     get_stock_data('AAPL', '2024-11-20', '2024-11-26')
     conn = sqlite3.connect("./stock_data.db")
-    # question="Write a SQL query to select All Stocks of AAPL"
-    #question = "What was the difference between last open and close value for Tesla"
     print(question)
-
-    query = generate_sql_query(schema, user_question)
+    query = generate_sql_query(schema, question)
     print("\nGenerated SQL Query:")
     print(query)
-    # Fetch the data into a DataFrame
     df = pd.read_sql_query(query, conn)
-
-    # Close the connection
     conn.close()
-
-    # Display the fetched data
     print("Data retrieved from the database:")
-    #print(df)
     return df
-
 
 # Main Execution
 if __name__ == "__main__":
@@ -194,8 +152,7 @@ if __name__ == "__main__":
     );
     """
     user_question = "What was the last open and close value for TSLA?"
-    df=fetch_data(schema, user_question)
-    #print("\nGenerated SQL Query:")
+    df = fetch_data(schema, user_question)
     print(df)
 
     # Example for LLM2 - RAG Placeholder
@@ -203,7 +160,7 @@ if __name__ == "__main__":
     print(llm2_display_url())
 
     # Example for LLM3 - Web Search
-    web_search_question = "What are the latest trends in the stock market?"
-    web_search_response = execute_web_search(web_search_question)
-    print("\nWeb Search Agent Response:")
-    print(web_search_response)
+    problem = "Can I invest in the Zomato stocks?"
+    web_search_news = execute_web_search_llm3(problem)
+    print("\nWeb Search LLM-3 Output:")
+    print(web_search_news)
